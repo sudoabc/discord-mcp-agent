@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { Guild, PermissionFlagsBits, ChannelType, type ColorResolvable } from "discord.js";
+import { Guild, PermissionFlagsBits, ChannelType, TextChannel, type ColorResolvable } from "discord.js";
 import { z } from "zod";
 import { RequirePermissions, RequireHierarchy } from "./guards.js";
 import MCPBot from "./bot.js";
@@ -110,12 +110,71 @@ export default class MCPServer extends McpServer {
         return ok(`Server renamed from "${old}" to "${args.name}"`);
     }
 
+    async sendMessage(guild: Guild, args: { channel: string, message: string}) {
+        const channel = guild.channels.cache.get(args.channel) as TextChannel;
+        await channel!.send({content: args.message});
+        return ok(`Sent '${args.message}' in ${channel.name}`);
+    }
+
+    async viewChannels(guild: Guild) {
+        const channels = guild.channels.cache.map(channel => ({
+            id: channel.id,
+            name: channel.name,
+            type: ChannelType[channel.type],
+            parent_id: channel.parentId,
+            parent_name: channel.parent?.name || null,
+            createdAt: channel.createdTimestamp,
+        }));
+        return ok(JSON.stringify(channels));
+    }
+
+    async viewRoles(guild: Guild) {
+        const roles = guild.roles.cache.map(role => ({
+            id: role.id,
+            name: role.name,
+            color: role.hexColor,
+            position: role.position,
+            permissions: role.permissions,
+            mentionable: role.mentionable,
+            createdAt: role.createdTimestamp,
+            hoisted: role.hoist,
+            assignable: role.editable,
+            members: role.members.map(member => ({
+                id: member.id,
+                username: member.user.username,
+                displayName: member.user.displayName,
+                nickname: member.nickname,
+                avatarUrl: member.displayAvatarURL({size: 1024}),
+                bannerUrl: member.displayBannerURL({size: 1024}),
+                createdAt: member.user.createdTimestamp,
+                joinedAt: member.joinedTimestamp,
+                timedOut: member.communicationDisabledUntilTimestamp != null
+            })),
+        }));
+
+        roles.sort((a, b) => a.position - b.position);
+        return ok(JSON.stringify(roles));
+    }
+
     private registerTools(): void {
         const guild = () => {
             const g = this.client.guilds.cache.get(process.env.GUILD_ID!);
             if (!g) throw new Error("Guild not found.");
             return g;
         };
+        
+        this.registerTool("send_message", {
+            description: "Send a message in a channel",
+            inputSchema: z.object({
+                channel: z.string(),
+                message: z.string()
+            })
+        }, (args) => this.sendMessage(guild(), args));
+
+        this.registerTool("view_channels", {
+            description: "View all channels in the server",
+            inputSchema: z.object({})
+        }, () => this.viewChannels(guild()));
 
         this.registerTool("create_channel", {
             description: "Create a text, voice, or category channel",
@@ -131,6 +190,11 @@ export default class MCPServer extends McpServer {
             description: "Delete a channel by name or ID",
             inputSchema: z.object({ channel: z.string() }),
         }, (args) => this.deleteChannel(guild(), args));
+
+        this.registerTool("view_roles", {
+            description: "View all roles in the server",
+            inputSchema: z.object({})
+        }, () => this.viewRoles(guild()));
 
         this.registerTool("create_role", {
             description: "Create a role",
