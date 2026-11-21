@@ -30,14 +30,14 @@ export default class MCPServer extends McpServer {
         const { name, type, category, nsfw } = args;
 
         const channelType =
-        type === "voice" ? ChannelType.GuildVoice
-        : type === "category" ? ChannelType.GuildCategory
-        : ChannelType.GuildText;
+            type === "voice" ? ChannelType.GuildVoice
+            : type === "category" ? ChannelType.GuildCategory
+            : ChannelType.GuildText;
 
         let parentId: string | undefined;
         if (category) {
             const found = guild.channels.cache.find(
-            (c) => (c.name === category || c.id === category) && c.type === ChannelType.GuildCategory
+                (c) => (c.name === category || c.id === category) && c.type === ChannelType.GuildCategory
             );
             if (!found) return err(`Category "${category}" not found.`);
             parentId = found.id;
@@ -110,10 +110,34 @@ export default class MCPServer extends McpServer {
         return ok(`Server renamed from "${old}" to "${args.name}"`);
     }
 
-    async sendMessage(guild: Guild, args: { channel: string, message: string}) {
-        const channel = guild.channels.cache.get(args.channel) as TextChannel;
-        await channel!.send({content: args.message});
+    @RequirePermissions(PermissionFlagsBits.ViewChannel)
+    @RequirePermissions(PermissionFlagsBits.SendMessages)
+    async sendMessage(guild: Guild, args: { channel: string, message: string, reference?: string | undefined }) {
+        const channel = guild.channels.cache.find((c) => c.id === args.channel || c.name === args.channel);
+        
+        if (!channel) return err(`Channel "${args.channel}" not found.`);
+        if (!("send" in channel)) return err(`Channel "${args.channel}" is not a chattable channel.`);
+
+        if (args.reference) {
+            const message = await channel.messages.fetch(args.reference);
+            if (!message) return err(`Message "${args.reference}" not found.`);
+            await message.reply({ content: args.message });
+        } else
+            await channel.send({content: args.message});
+
         return ok(`Sent '${args.message}' in ${channel.name}`);
+    }
+
+    @RequirePermissions(PermissionFlagsBits.ViewChannel)
+    @RequirePermissions(PermissionFlagsBits.ReadMessageHistory)
+    async readMessages(guild: Guild, args: { channel: string, limit?: number }) {
+        const channel = guild.channels.cache.find((c) => c.id === args.channel || c.name === args.channel);
+
+        if (!channel) return err(`Channel "${args.channel}" not found.`);
+        if (!("messages" in channel)) return err(`Channel "${args.channel}" is not a chattable channel.`);
+
+        const messages = await channel.messages.fetch({ limit: Math.min(args.limit || 10, 100) });
+        return ok(JSON.stringify(messages));
     }
 
     async viewChannels(guild: Guild) {
@@ -166,8 +190,16 @@ export default class MCPServer extends McpServer {
         this.registerTool("send_message", {
             description: "Send a message in a channel",
             inputSchema: z.object({
-                channel: z.string(),
-                message: z.string()
+                channel: z.string()
+                    .describe(
+                        "Channel ID (preferred) or exact channel name. Use view_channels to look up IDs."
+                    ),
+                message: z.string(),
+                reference: z.string()
+                    .optional()
+                    .describe(
+                        "Message ID to reply to (optional). Use view_messages to look up IDs if the specific message id is not provided."
+                    ),
             })
         }, (args) => this.sendMessage(guild(), args));
 
@@ -215,6 +247,14 @@ export default class MCPServer extends McpServer {
             description: "Change the server name",
             inputSchema: z.object({ name: z.string() }),
         }, (args) => this.renameServer(guild(), args));
+
+        this.registerTool("read_messages", {
+            description: "Read messages from a channel",
+            inputSchema: z.object({
+                channel: z.string().describe("Channel ID (preferred) or exact channel name. Use view_channels to look up IDs."),
+                limit: z.number().optional().default(10).describe("Number of messages to read (max 100)"),
+            }),
+        }, (args) => this.readMessages(guild(), args));
     }
 
     async start(): Promise<void> {
