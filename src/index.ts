@@ -1,4 +1,4 @@
-import MCPServer from "./server.js";
+import MCPServer from "./server/index.js";
 import MCPBot from "./bot.js";
 
 const client = new MCPBot();
