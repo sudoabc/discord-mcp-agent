@@ -55,7 +55,17 @@ const updateServerSchema = z.object({
         .describe("AFK timeout in seconds. An AFK voice channel must be configured."),
     premiumProgressBarEnabled: z.boolean().optional()
         .describe("Whether to show the server boost progress bar."),
-});
+}).refine(
+    (args) =>
+        args.name !== undefined ||
+        args.description !== undefined ||
+        args.systemChannelId !== undefined ||
+        args.rulesChannelId !== undefined ||
+        args.afkChannelId !== undefined ||
+        args.afkTimeout !== undefined ||
+        args.premiumProgressBarEnabled !== undefined,
+    { message: "Provide at least one server setting to update." },
+);
 
 class GuildTools {
     readonly client: MCPBot;
@@ -67,27 +77,30 @@ class GuildTools {
     @RequirePermissions(PermissionFlagsBits.ManageGuild)
     async updateServer(
         guild: Guild,
-        args: z.infer<typeof updateServerSchema> & { confirm: true },
+        args: z.infer<typeof updateServerSchema> & { confirm: boolean; reason?: string | undefined },
     ): Promise<ToolResult> {
+        if (!args.confirm) return err("action was not confirmed");
+
         const patch: GuildEditOptions = {};
         const changed: string[] = [];
 
-        if (args.name !== undefined) patch.name = args.name;
-        if (args.name !== undefined) changed.push("name");
+        if (args.name !== undefined) {
+            patch.name = args.name;
+            changed.push("name");
+        }
 
-        if (args.description !== undefined) patch.description = args.description;
-        if (args.description !== undefined) changed.push("description");
+        if (args.description !== undefined) {
+            patch.description = args.description;
+            changed.push("description");
+        }
 
         if (args.systemChannelId !== undefined) {
             if (args.systemChannelId !== null) {
                 const channel = guild.channels.cache.get(args.systemChannelId);
                 if (!channel) return err(`System channel "${args.systemChannelId}" not found.`);
-                if (
-                    channel.type !== ChannelType.GuildText &&
-                    channel.type !== ChannelType.GuildAnnouncement
-                ) {
+                if (channel.type !== ChannelType.GuildText &&
+                    channel.type !== ChannelType.GuildAnnouncement)
                     return err(`"${args.systemChannelId}" is not a text channel.`);
-                }
             }
             patch.systemChannel = args.systemChannelId;
             changed.push("systemChannel");
@@ -97,12 +110,9 @@ class GuildTools {
             if (args.rulesChannelId !== null) {
                 const channel = guild.channels.cache.get(args.rulesChannelId);
                 if (!channel) return err(`Rules channel "${args.rulesChannelId}" not found.`);
-                if (
-                    channel.type !== ChannelType.GuildText &&
-                    channel.type !== ChannelType.GuildAnnouncement
-                ) {
+                if (channel.type !== ChannelType.GuildText &&
+                    channel.type !== ChannelType.GuildAnnouncement)
                     return err(`"${args.rulesChannelId}" is not a text channel.`);
-                }
             }
             patch.rulesChannel = args.rulesChannelId;
             changed.push("rulesChannel");
@@ -112,25 +122,25 @@ class GuildTools {
             if (args.afkChannelId !== null) {
                 const channel = guild.channels.cache.get(args.afkChannelId);
                 if (!channel) return err(`AFK channel "${args.afkChannelId}" not found.`);
-                if (
-                    channel.type !== ChannelType.GuildVoice &&
-                    channel.type !== ChannelType.GuildStageVoice
-                ) {
+                if (channel.type !== ChannelType.GuildVoice &&
+                    channel.type !== ChannelType.GuildStageVoice)
                     return err(`"${args.afkChannelId}" is not a voice channel.`);
-                }
             }
             patch.afkChannel = args.afkChannelId;
             changed.push("afkChannel");
         }
 
-        if (args.afkTimeout !== undefined) patch.afkTimeout = args.afkTimeout;
-        if (args.afkTimeout !== undefined) changed.push("afkTimeout");
+        if (args.afkTimeout !== undefined) {
+            patch.afkTimeout = args.afkTimeout;
+            changed.push("afkTimeout");
+        }
 
         if (args.premiumProgressBarEnabled !== undefined) {
             patch.premiumProgressBarEnabled = args.premiumProgressBarEnabled;
             changed.push("premiumProgressBarEnabled");
         }
 
+        if (args.reason !== undefined) patch.reason = args.reason;
         if (changed.length === 0) return err("No changes specified.");
 
         await guild.edit(patch);
@@ -149,8 +159,10 @@ export function registerGuildTools(server: McpServer, client: MCPBot): void {
     server.registerTool("update_guild", {
         description: "Update selected server settings after the user confirms.",
         inputSchema: updateServerSchema.extend({
-            confirm: z.literal(true)
+            confirm: z.boolean()
                 .describe("Set to true to confirm this update."),
+            reason: z.string().max(512).optional()
+                .describe("Optional reason recorded in the Discord audit log."),
         }),
     }, (args) => tools.updateServer(getGuild(client), args));
 }

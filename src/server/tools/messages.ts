@@ -225,7 +225,8 @@ const sendMessageSchema = z.object({
         .describe("Whether Discord should enforce nonce deduplication."),
     reference: z.string().optional()
         .describe("Message ID to reply to. Use get_message or read_messages to look it up."),
-}).refine(
+})
+.refine(
     (args) =>
         args.content !== undefined ||
         (args.embeds?.length ?? 0) > 0 ||
@@ -252,7 +253,14 @@ const editMessageSchema = z.object({
         .describe("Components V2 layout objects."),
     allowedMentions: allowedMentionsSchema.optional()
         .describe("Controls which users, roles, or everyone mentions are allowed."),
-});
+}).refine(
+    (args) =>
+        args.content !== undefined ||
+        args.embeds !== undefined ||
+        args.components !== undefined ||
+        args.allowedMentions !== undefined,
+    { message: "Provide content, embeds, components, or allowedMentions to edit." },
+);
 
 const reactionSchema = z.object({
     channel: z.string()
@@ -277,7 +285,7 @@ const deleteMessageSchema = z.object({
         .describe("Channel ID. Use view_channels to look up the ID."),
     message: z.string()
         .describe("Message ID. Use get_message or read_messages to look it up."),
-    confirm: z.literal(true)
+    confirm: z.boolean()
         .describe("Set to true to confirm deleting this message."),
 });
 
@@ -456,6 +464,8 @@ class MessageTools {
         guild: Guild,
         args: z.infer<typeof deleteMessageSchema>,
     ): Promise<ToolResult> {
+        if (!args.confirm) return err("action was not confirmed");
+
         const channel = guild.channels.cache.get(args.channel);
         if (!channel) return err(`Channel "${args.channel}" not found.`);
         if (!("messages" in channel)) return err(`Channel "${args.channel}" is not a chattable channel.`);
